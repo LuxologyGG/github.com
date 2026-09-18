@@ -1,0 +1,48 @@
+name: Install standalone map quiz
+on:
+  push:
+    branches: [map-quiz]
+    paths: [.github/workflows/install-map-quiz.yml]
+  workflow_dispatch:
+permissions:
+  contents: write
+jobs:
+  import:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: map-quiz
+      - name: Retrieve and verify the existing quiz export
+        run: |
+          curl --fail --location --retry 3 --max-time 90 'https://d2ol7oe51mr4n9.cloudfront.net/user_3HFx6o6vuYL5mZ9Cq923VjpCjEa/5cf62320-8ea5-4a3b-beb7-7b01fbecfce7.zip' -o "$RUNNER_TEMP/map-quiz.zip"
+          echo "0761bc3da1d9fdbfd010facda5ce185f45f8b013ddd9af92bccf95a3978d265a  $RUNNER_TEMP/map-quiz.zip" | sha256sum --check
+      - name: Add site and editable source without changing existing files
+        env:
+          ARCHIVE: ${{ runner.temp }}/map-quiz.zip
+        run: |
+          python3 - <<'PY'
+          import os, pathlib, zipfile
+          allowed = {'docs', 'map-quiz-source', 'MAP-QUIZ-README.md', 'offline-map-quiz.html'}
+          with zipfile.ZipFile(os.environ['ARCHIVE']) as archive:
+              for member in archive.infolist():
+                  path = pathlib.PurePosixPath(member.filename)
+                  assert not path.is_absolute() and '..' not in path.parts
+                  assert path.parts[0] in allowed
+                  assert 'node_modules' not in path.parts
+                  assert not pathlib.Path(member.filename).exists(), f'Existing file: {member.filename}'
+              archive.extractall('.')
+          assert pathlib.Path('docs/index.html').is_file()
+          assert pathlib.Path('docs/assets/class-map.png').is_file()
+          assert pathlib.Path('docs/assets/class-map-annotated.png').is_file()
+          assert pathlib.Path('docs/app.js').is_file()
+          PY
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add docs map-quiz-source MAP-QUIZ-README.md offline-map-quiz.html
+          git commit -m 'Add fully local map quiz, source, and offline copy'
+          git push origin HEAD:map-quiz
+      - name: Publishing setting
+        run: |
+          echo 'Site files are in docs on the map-quiz branch. Enable Settings > Pages > Deploy from a branch > map-quiz > /docs > Save.' >> "$GITHUB_STEP_SUMMARY"
